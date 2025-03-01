@@ -71,6 +71,8 @@ services:
     volumes:
       - ./client-1-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
+    depends_on:
+      - s1
 
   c2:
     image: omnipaxos-client
@@ -82,6 +84,8 @@ services:
     volumes:
       - ./client-2-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
+    depends_on:
+      - s1
 
   postgres:
     image: postgres:13
