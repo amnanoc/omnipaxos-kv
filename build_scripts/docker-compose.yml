@@ -15,28 +15,49 @@ services:
     container_name: s1
     environment:
       <<: *common-server-variables
+      POSTGRES_HOST: "postgres"
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "mydatabase"
     volumes:
       - ./server-1-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
+    depends_on:
+      - postgres
+
   s2:
     image: omnipaxos-server
     container_name: s2
     environment:
       <<: *common-server-variables
+      POSTGRES_HOST: "postgres"
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "mydatabase"
     volumes:
       - ./server-2-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
+    depends_on:
+      - postgres
+
   s3:
     image: omnipaxos-server
     container_name: s3
     environment:
       <<: *common-server-variables
+      POSTGRES_HOST: "postgres"
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "mydatabase"
     volumes:
       - ./server-3-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
+    depends_on:
+      - postgres
+
   c1:
     image: omnipaxos-client
     build:
@@ -50,6 +71,7 @@ services:
     volumes:
       - ./client-1-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
+
   c2:
     image: omnipaxos-client
     container_name: c2
@@ -60,3 +82,18 @@ services:
     volumes:
       - ./client-2-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
+
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "mydatabase"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
