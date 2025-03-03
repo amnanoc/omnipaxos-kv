@@ -25,6 +25,8 @@ services:
       - ./logs/:/app/logs/
     depends_on:
       - postgres
+    networks:
+      - omnipaxos-net
 
   s2:
     image: omnipaxos-server
@@ -41,6 +43,8 @@ services:
       - ./logs/:/app/logs/
     depends_on:
       - postgres
+    networks:
+      - omnipaxos-net
 
   s3:
     image: omnipaxos-server
@@ -57,6 +61,8 @@ services:
       - ./logs/:/app/logs/
     depends_on:
       - postgres
+    networks:
+      - omnipaxos-net
 
   c1:
     image: omnipaxos-client
@@ -73,6 +79,8 @@ services:
       - ./logs/:/app/logs/
     depends_on:
       - s1
+    networks:
+      - omnipaxos-net
 
   c2:
     image: omnipaxos-client
@@ -86,6 +94,8 @@ services:
       - ./logs/:/app/logs/
     depends_on:
       - s1
+    networks:
+      - omnipaxos-net
 
   postgres:
     image: postgres:13
@@ -98,6 +108,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - omnipaxos-net
 
 volumes:
   postgres_data:
+
+networks:
+  omnipaxos-net:

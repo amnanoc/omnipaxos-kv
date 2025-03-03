@@ -37,7 +37,7 @@ impl OmniPaxosServer {
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(),
+            database: Database::new().await,
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -132,12 +132,12 @@ impl OmniPaxosServer {
         }
     }
 
-    fn update_database_and_respond(&mut self, commands: Vec<Command>) {
+    async fn update_database_and_respond(&mut self, commands: Vec<Command>) {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
             let read = self.database.handle_command(command.kv_cmd);
             if command.coordinator_id == self.id {
-                let response = match read {
+                let response = match read.await {
                     Some(read_result) => ServerMessage::Read(command.id, read_result),
                     None => ServerMessage::Write(command.id),
                 };
