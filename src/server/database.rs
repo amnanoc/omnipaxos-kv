@@ -16,6 +16,8 @@ impl Database {
             .await
             .expect("Failed to connect to PostgreSQL");
 
+        println!("✅ Successfully connected to PostgreSQL!");
+
         // Ensure table exists
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS kv_store (
@@ -34,10 +36,10 @@ impl Database {
     pub async fn handle_command(&self, command: KVCommand) -> Option<Option<String>> {
         match command {
             KVCommand::Put(key, value) => {
-                sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
-                             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;")
-                    .bind(key)
-                    .bind(value)
+                let result = sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
+                                          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;")
+                    .bind(&key)
+                    .bind(&value)
                     .execute(&self.pool)
                     .await
                     .expect("Failed to insert into PostgreSQL");
