@@ -37,7 +37,7 @@ impl OmniPaxosServer {
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(),
+            database: Database::new().await,
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -111,7 +111,7 @@ impl OmniPaxosServer {
         }
     }
 
-    fn handle_decided_entries(&mut self) {
+    async fn handle_decided_entries(&mut self) {
         // TODO: Can use a read_raw here to avoid allocation
         let new_decided_idx = self.omnipaxos.get_decided_idx();
         if self.current_decided_idx < new_decided_idx {
@@ -128,14 +128,14 @@ impl OmniPaxosServer {
                     _ => unreachable!(),
                 })
                 .collect();
-            self.update_database_and_respond(decided_commands);
+            self.update_database_and_respond(decided_commands).await;
         }
     }
 
-    fn update_database_and_respond(&mut self, commands: Vec<Command>) {
+    async fn update_database_and_respond(&mut self, commands: Vec<Command>) {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
-            let read = self.database.handle_command(command.kv_cmd);
+            let read = self.database.handle_command(command.kv_cmd).await;
             if command.coordinator_id == self.id {
                 let response = match read {
                     Some(read_result) => ServerMessage::Read(command.id, read_result),
@@ -177,7 +177,7 @@ impl OmniPaxosServer {
             match message {
                 ClusterMessage::OmniPaxosMessage(m) => {
                     self.omnipaxos.handle_incoming(m);
-                    self.handle_decided_entries();
+                    self.handle_decided_entries().await;
                 }
                 ClusterMessage::LeaderStartSignal(start_time) => {
                     debug!("Received start message from peer {from}");
