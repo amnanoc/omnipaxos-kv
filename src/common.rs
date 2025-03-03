@@ -65,6 +65,7 @@ pub mod kv {
         Put(String, String),
         Delete(String),
         Get(String),
+        SQLQuery(String),
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,6 +90,7 @@ pub mod kv {
                         }
                     }
                     KVCommand::Get(_) => (),
+                    KVCommand::SQLQuery(_) => ()
                 }
             }
             // remove keys that were put back

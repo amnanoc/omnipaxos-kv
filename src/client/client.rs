@@ -160,4 +160,11 @@ impl Client {
             .to_csv(self.config.output_filepath.clone())?;
         Ok(())
     }
+
+    pub async fn send_sql_query(&mut self, query: String) {
+        let request = ClientMessage::Append(self.next_request_id, KVCommand::SQLQuery(query));
+        self.network.send(self.active_server, request).await;
+        self.client_data.new_request(false); 
+        self.next_request_id += 1;
+    }
 }

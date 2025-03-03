@@ -33,11 +33,13 @@ impl OmniPaxosServer {
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
+        let database_url = "postgres://user:password@postgres/mydatabase"; // Use environment variables for credentials
+        let database = Database::new(database_url).await.unwrap();
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(),
+            database,
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -132,14 +134,17 @@ impl OmniPaxosServer {
         }
     }
 
-    fn update_database_and_respond(&mut self, commands: Vec<Command>) {
-        // TODO: batching responses possible here (batch at handle_cluster_messages)
+    async fn update_database_and_respond(&mut self, commands: Vec<Command>) {
         for command in commands {
-            let read = self.database.handle_command(command.kv_cmd);
+            let read = self.database.handle_command(command.kv_cmd).await;
             if command.coordinator_id == self.id {
                 let response = match read {
-                    Some(read_result) => ServerMessage::Read(command.id, read_result),
-                    None => ServerMessage::Write(command.id),
+                    Ok(Some(read_result)) => ServerMessage::Read(command.id, read_result),
+                    Ok(None) => ServerMessage::Write(command.id),
+                    Err(err) => {
+                        error!("Database error: {:?}", err);
+                        continue;
+                    }
                 };
                 self.network.send_to_client(command.client_id, response);
             }
