@@ -4,11 +4,12 @@ use sqlx::postgres::PgPoolOptions;
 
 pub struct Database {
     pool: Pool<Postgres>,
+    is_leader: bool, // Add a flag to check if the current node is the leader
 }
 
 impl Database {
     /// Initializes the database and connects to PostgreSQL
-    pub async fn new() -> Self {
+    pub async fn new(is_leader: bool) -> Self {
         let database_url = "postgres://user:password@postgres/mydatabase";
         let pool = PgPoolOptions::new()
             .max_connections(5)
@@ -29,7 +30,7 @@ impl Database {
         .await
         .expect("Failed to create table");
 
-        Self { pool }
+        Self { pool, is_leader }
     }
 
     /// Handles a command (Put, Get, Delete) and interacts with PostgreSQL
@@ -53,13 +54,12 @@ impl Database {
                     .expect("Failed to delete from PostgreSQL");
                 None
             }
-            //  Leader Reads: Always read from the leader node, get the most recent data
-            //  Local Reads: Read from any available node, potentially returning stale data
-            //  Linearizable Reads: Ensure reads reflect the latest committed state across all nodes
             KVCommand::Get { key, consistency } => {
                 match consistency {
                     ConsistencyLevel::Leader => {
-                        // Needs leader check
+                        if !self.is_leader {
+                            panic!("Read request must be directed to the leader node");
+                        }
                         let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
                             .bind(key)
                             .fetch_optional(&self.pool)

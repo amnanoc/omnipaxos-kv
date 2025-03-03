@@ -33,11 +33,12 @@ impl OmniPaxosServer {
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
+        let is_leader = config.cluster.initial_leader == config.local.server_id; 
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new().await,
+            database: Database::new(is_leader).await,
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -109,6 +110,13 @@ impl OmniPaxosServer {
                 },
             }
         }
+    }
+
+    pub fn is_leader(&self) -> bool {
+        if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
+            return leader_id == self.id;
+        }
+        false
     }
 
     async fn handle_decided_entries(&mut self) {
