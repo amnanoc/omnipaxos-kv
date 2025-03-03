@@ -53,7 +53,10 @@ impl Database {
                     .expect("Failed to delete from PostgreSQL");
                 None
             }
-            KVCommand::Get(key) => {
+            KVCommand::Get{ key, consistency } => {
+                //  Leader Reads: Always read from the leader node, get the most recent data
+                //  Local Reads: Read from any available node, potentially returning stale data
+                //  Linearizable Reads: Ensure reads reflect the latest committed state across all nodes
                 let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
                     .bind(key)
                     .fetch_optional(&self.pool)
