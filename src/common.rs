@@ -64,7 +64,17 @@ pub mod kv {
     pub enum KVCommand {
         Put(String, String),
         Delete(String),
-        Get(String),
+        Get {
+            key: String,
+            consistency: ConsistencyLevel,
+        },
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum ConsistencyLevel {
+        Leader,       
+        Local,        
+        Linearizable, 
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,7 +98,7 @@ pub mod kv {
                             deleted_keys.push(key.clone());
                         }
                     }
-                    KVCommand::Get(_) => (),
+                    KVCommand::Get { key: _, consistency: _ } => (),
                 }
             }
             // remove keys that were put back
