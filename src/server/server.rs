@@ -35,12 +35,11 @@ impl OmniPaxosServer {
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
         let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial node
-        let peers = config.get_peers(config.local.server_id);
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(is_leader,peers).await, //Database initialzied with initial node and peers
+            database: Database::new(is_leader).await,  
             network,
             omnipaxos,
             current_decided_idx: 0,

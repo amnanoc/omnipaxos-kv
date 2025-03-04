@@ -122,7 +122,7 @@ impl Client {
             true => KVCommand::Put(key.clone(), key),
             false => KVCommand::Get {
                 key,
-                consistency: ConsistencyLevel::Local, // Default to Local reads (Change for others: Leader or Linearizable)
+                consistency: ConsistencyLevel::Leader, // Default to Local reads (Change for others: Leader or Linearizable)
             },
         };
         let request = ClientMessage::Append(self.next_request_id, cmd);
