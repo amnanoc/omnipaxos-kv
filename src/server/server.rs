@@ -33,12 +33,12 @@ impl OmniPaxosServer {
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
-        let is_leader = config.cluster.initial_leader == config.local.server_id; 
+        let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial leader
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(is_leader).await,
+            database: Database::new(is_leader).await, //Database initialzied with first leader
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -88,6 +88,7 @@ impl OmniPaxosServer {
                 _ = leader_takeover_interval.tick(), if self.config.cluster.initial_leader == self.id => {
                     if let Some((curr_leader, is_accept_phase)) = self.omnipaxos.get_current_leader(){
                         if curr_leader == self.id && is_accept_phase {
+                            self.database.set_leader_status(true); //Adjust new leader here
                             info!("{}: Leader fully initialized", self.id);
                             let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
                             self.send_cluster_start_signals(experiment_sync_start);
@@ -112,12 +113,6 @@ impl OmniPaxosServer {
         }
     }
 
-    pub fn is_leader(&self) -> bool {
-        if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
-            return leader_id == self.id;
-        }
-        false
-    }
 
     async fn handle_decided_entries(&mut self) {
         // TODO: Can use a read_raw here to avoid allocation

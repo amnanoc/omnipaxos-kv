@@ -33,6 +33,10 @@ impl Database {
         Self { pool, is_leader }
     }
 
+    pub fn set_leader_status(&mut self, is_leader: bool) { // Update leader over time
+        self.is_leader = is_leader;
+    }
+
     /// Handles a command (Put, Get, Delete) and interacts with PostgreSQL
     pub async fn handle_command(&self, command: KVCommand) -> Option<Option<String>> {
         match command {
