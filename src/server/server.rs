@@ -10,6 +10,7 @@ use omnipaxos_kv::common::{kv::*, messages::*, utils::Timestamp};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use std::{fs::File, io::Write, time::Duration};
 
+
 type OmniPaxosInstance = OmniPaxos<Command, MemoryStorage<Command>>;
 const NETWORK_BATCH_SIZE: usize = 100;
 const LEADER_WAIT: Duration = Duration::from_secs(1);
@@ -33,12 +34,13 @@ impl OmniPaxosServer {
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
-        let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial leader
+        let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial node
+        let peers = config.get_peers(config.local.server_id);
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(is_leader).await, //Database initialzied with first leader
+            database: Database::new(is_leader,peers).await, //Database initialzied with initial node and peers
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -46,6 +48,13 @@ impl OmniPaxosServer {
             peers: config.get_peers(config.local.server_id),
             config,
         }
+    }
+
+    pub fn is_leader(&self) -> bool {
+        if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
+            return leader_id == self.id;
+        }
+        false
     }
 
     pub async fn run(&mut self) {
@@ -63,6 +72,8 @@ impl OmniPaxosServer {
                 _ = election_interval.tick() => {
                     self.omnipaxos.tick();
                     self.send_outgoing_msgs();
+                    let is_leader = self.is_leader(); 
+                    self.database.set_leader_status(is_leader); 
                 },
                 _ = self.network.cluster_messages.recv_many(&mut cluster_msg_buf, NETWORK_BATCH_SIZE) => {
                     self.handle_cluster_messages(&mut cluster_msg_buf).await;
