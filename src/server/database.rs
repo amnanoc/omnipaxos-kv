@@ -74,8 +74,8 @@ impl Database {
 
                             Some(row.map(|r| r.get::<String, _>(0)))
                         } else {
-                            println!("I should forward");
-                            None
+                            println!("Forwarding to leader..."); // Forwarding code in update_database_and_respond server.rs
+                            None // Indicating forward
                         }
                     }                    
                     ConsistencyLevel::Local => { // Read from any node, no guaranteeing the latest committed data

@@ -17,6 +17,7 @@ pub mod messages {
     pub enum ClusterMessage {
         OmniPaxosMessage(OmniPaxosMessage<Command>),
         LeaderStartSignal(Timestamp),
+        ForwardedGet(Command),
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,6 +70,13 @@ pub mod kv {
             consistency: ConsistencyLevel,
         },
     }
+
+    impl KVCommand {
+        pub fn is_get(&self) -> bool {
+            matches!(self, KVCommand::Get { .. })
+        }
+    }
+
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum ConsistencyLevel {

@@ -148,16 +148,27 @@ impl OmniPaxosServer {
     async fn update_database_and_respond(&mut self, commands: Vec<Command>) {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
-            let read = self.database.handle_command(command.kv_cmd).await;
+            let kv_cmd = command.kv_cmd.clone(); // Clone before passing
+            let read = self.database.handle_command(kv_cmd.clone()).await; 
+    
             if command.coordinator_id == self.id {
                 let response = match read {
                     Some(read_result) => ServerMessage::Read(command.id, read_result),
                     None => ServerMessage::Write(command.id),
                 };
                 self.network.send_to_client(command.client_id, response);
+            } else if kv_cmd.is_get() && read.is_none() { // Command is of type GET and returned none - indicating forward
+                // Forward Get command if it needs a leader
+                if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
+                    if leader_id != self.id {
+                        let cluster_msg = ClusterMessage::ForwardedGet(command);
+                        self.network.send_to_cluster(leader_id, cluster_msg);
+                    }
+                }
             }
         }
     }
+    
 
     fn send_outgoing_msgs(&mut self) {
         self.omnipaxos
@@ -196,6 +207,13 @@ impl OmniPaxosServer {
                     debug!("Received start message from peer {from}");
                     received_start_signal = true;
                     self.send_client_start_signals(start_time);
+                }
+                ClusterMessage::ForwardedGet(command) => {
+                    if self.is_leader() {
+                        let read = self.database.handle_command(command.kv_cmd).await;
+                        let response = ServerMessage::Read(command.id, read.unwrap_or(None));
+                        self.network.send_to_client(command.client_id, response);
+                    }
                 }
             }
         }
