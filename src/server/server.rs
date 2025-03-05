@@ -10,6 +10,7 @@ use omnipaxos_kv::common::{kv::*, messages::*, utils::Timestamp};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use std::{fs::File, io::Write, time::Duration};
 
+
 type OmniPaxosInstance = OmniPaxos<Command, MemoryStorage<Command>>;
 const NETWORK_BATCH_SIZE: usize = 100;
 const LEADER_WAIT: Duration = Duration::from_secs(1);
@@ -33,11 +34,12 @@ impl OmniPaxosServer {
         let omnipaxos_config: OmniPaxosConfig = config.clone().into();
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
+        let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial node
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new().await,
+            database: Database::new(is_leader).await,  
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -45,6 +47,13 @@ impl OmniPaxosServer {
             peers: config.get_peers(config.local.server_id),
             config,
         }
+    }
+
+    pub fn is_leader(&self) -> bool {
+        if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
+            return leader_id == self.id;
+        }
+        false
     }
 
     pub async fn run(&mut self) {
@@ -62,6 +71,8 @@ impl OmniPaxosServer {
                 _ = election_interval.tick() => {
                     self.omnipaxos.tick();
                     self.send_outgoing_msgs();
+                    let is_leader = self.is_leader(); 
+                    self.database.set_leader_status(is_leader); 
                 },
                 _ = self.network.cluster_messages.recv_many(&mut cluster_msg_buf, NETWORK_BATCH_SIZE) => {
                     self.handle_cluster_messages(&mut cluster_msg_buf).await;
@@ -87,6 +98,7 @@ impl OmniPaxosServer {
                 _ = leader_takeover_interval.tick(), if self.config.cluster.initial_leader == self.id => {
                     if let Some((curr_leader, is_accept_phase)) = self.omnipaxos.get_current_leader(){
                         if curr_leader == self.id && is_accept_phase {
+                            self.database.set_leader_status(true); //Adjust new leader here
                             info!("{}: Leader fully initialized", self.id);
                             let experiment_sync_start = (Utc::now() + Duration::from_secs(2)).timestamp_millis();
                             self.send_cluster_start_signals(experiment_sync_start);
@@ -110,6 +122,7 @@ impl OmniPaxosServer {
             }
         }
     }
+
 
     async fn handle_decided_entries(&mut self) {
         // TODO: Can use a read_raw here to avoid allocation
@@ -135,16 +148,35 @@ impl OmniPaxosServer {
     async fn update_database_and_respond(&mut self, commands: Vec<Command>) {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
-            let read = self.database.handle_command(command.kv_cmd).await;
+            let kv_cmd = command.kv_cmd.clone(); // Clone before passing
+
+            // Ensures all committed entries are applied before handling linearizable read
+            if let KVCommand::Get { key: _, consistency } = &kv_cmd {
+                if matches!(consistency, ConsistencyLevel::Linearizable) {
+                    Box::pin(self.handle_decided_entries()).await;
+                }                
+            }            
+
+            let read = self.database.handle_command(kv_cmd.clone()).await; 
+    
             if command.coordinator_id == self.id {
                 let response = match read {
                     Some(read_result) => ServerMessage::Read(command.id, read_result),
                     None => ServerMessage::Write(command.id),
                 };
                 self.network.send_to_client(command.client_id, response);
+            } else if kv_cmd.is_get() && read.is_none() { // Command is of type GET and returned none - indicating forward
+                // Forward Get command if it needs a leader
+                if let Some((leader_id, _)) = self.omnipaxos.get_current_leader() {
+                    if leader_id != self.id {
+                        let cluster_msg = ClusterMessage::ForwardedGet(command);
+                        self.network.send_to_cluster(leader_id, cluster_msg);
+                    }
+                }
             }
         }
     }
+    
 
     fn send_outgoing_msgs(&mut self) {
         self.omnipaxos
@@ -183,6 +215,13 @@ impl OmniPaxosServer {
                     debug!("Received start message from peer {from}");
                     received_start_signal = true;
                     self.send_client_start_signals(start_time);
+                }
+                ClusterMessage::ForwardedGet(command) => {
+                    if self.is_leader() {
+                        let read = self.database.handle_command(command.kv_cmd).await;
+                        let response = ServerMessage::Read(command.id, read.unwrap_or(None));
+                        self.network.send_to_client(command.client_id, response);
+                    }
                 }
             }
         }

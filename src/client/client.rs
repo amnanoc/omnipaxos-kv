@@ -120,7 +120,10 @@ impl Client {
         let key = self.next_request_id.to_string();
         let cmd = match is_write {
             true => KVCommand::Put(key.clone(), key),
-            false => KVCommand::Get(key),
+            false => KVCommand::Get {
+                key,
+                consistency: ConsistencyLevel::Linearizable, // Default to Local reads (Change for others: Leader or Linearizable)
+            },
         };
         let request = ClientMessage::Append(self.next_request_id, cmd);
         debug!("Sending {request:?}");
