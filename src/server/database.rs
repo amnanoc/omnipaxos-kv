@@ -88,8 +88,6 @@ impl Database {
                     }
                     ConsistencyLevel::Linearizable => { // See the most recent committed write
                         // Ensure this node has applied all committed log entries
-                    
-
                         let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
                             .bind(key)
                             .fetch_optional(&self.pool)

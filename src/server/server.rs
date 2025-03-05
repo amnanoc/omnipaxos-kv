@@ -149,6 +149,14 @@ impl OmniPaxosServer {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
             let kv_cmd = command.kv_cmd.clone(); // Clone before passing
+
+            // Ensures all committed entries are applied before handling linearizable read
+            if let KVCommand::Get { key: _, consistency } = &kv_cmd {
+                if matches!(consistency, ConsistencyLevel::Linearizable) {
+                    Box::pin(self.handle_decided_entries()).await;
+                }                
+            }            
+
             let read = self.database.handle_command(kv_cmd.clone()).await; 
     
             if command.coordinator_id == self.id {
