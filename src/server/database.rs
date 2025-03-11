@@ -1,15 +1,22 @@
 use omnipaxos_kv::common::kv::{KVCommand, ConsistencyLevel};
 use sqlx::{Pool, Postgres, Row};
 use sqlx::postgres::PgPoolOptions;
+use omnipaxos::{
+    util::{ NodeId },
+};
+use std::collections::HashMap;
+ 
 
 pub struct Database {
+ 
     pool: Pool<Postgres>,
-    is_leader: bool,
+    is_leader: bool, // Add a flag to check if the current node is the leader
+    peers: Vec<NodeId>,
 }
 
 impl Database {
     /// Initializes the database and connects to PostgreSQL
-    pub async fn new(is_leader: bool) -> Self {
+    pub async fn new(is_leader: bool, peers: Vec<NodeId>) -> Self {
         let database_url = "postgres://user:password@postgres/mydatabase";
         let pool = PgPoolOptions::new()
             .max_connections(5)
@@ -33,11 +40,45 @@ impl Database {
         Self {
             pool,
             is_leader,
+            peers,
         }
     }
 
     pub fn set_leader_status(&mut self, is_leader: bool) { // Update leader over time
         self.is_leader = is_leader;
+    }
+    
+    /// Perform a quorum-based read
+    async fn quorum_read(&self, key: String) -> Option<String> {
+        let mut responses = HashMap::new();
+        let quorum_size = (self.peers.len() / 2) + 1; // Simple majority quorum
+
+        // Query each peer for the value
+        for peer in &self.peers {
+            let value = self.read_from_peer(peer, &key).await;
+            if let Some(v) = value {
+                *responses.entry(v).or_insert(0) += 1;
+            }
+        }
+
+        // Find the value with a quorum
+        for (value, count) in responses {
+            if count >= quorum_size {
+                return Some(value);
+            }
+        }
+
+        None // No quorum reached
+    }
+
+    /// Read a value from a specific peer
+    async fn read_from_peer(&self, peer: &NodeId, key: &str) -> Option<String> {
+        let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .expect("Failed to fetch from PostgreSQL");
+        row.map(|r| r.get::<String, _>(0))
     }
 
 
@@ -87,14 +128,8 @@ impl Database {
                         Some(row.map(|r| r.get::<String, _>(0)))
                     }
                     ConsistencyLevel::Linearizable => { // See the most recent committed write
-                        // Ensure this node has applied all committed log entries
-                        let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
-                            .bind(key)
-                            .fetch_optional(&self.pool)
-                            .await
-                            .expect("Failed to fetch from PostgreSQL");
-
-                        Some(row.map(|r| r.get::<String, _>(0)))
+                        let value = self.quorum_read(key).await;
+                        Some(value)
                     }
                 }
             }

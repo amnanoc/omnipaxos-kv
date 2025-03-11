@@ -35,11 +35,12 @@ impl OmniPaxosServer {
         let omnipaxos_msg_buffer = Vec::with_capacity(omnipaxos_config.server_config.buffer_size);
         let omnipaxos = omnipaxos_config.build(storage).unwrap();
         let is_leader = config.cluster.initial_leader == config.local.server_id; //Initial node
+        let peers = config.get_peers(config.local.server_id);
         // Waits for client and server network connections to be established
         let network = Network::new(config.clone(), NETWORK_BATCH_SIZE).await;
         OmniPaxosServer {
             id: config.local.server_id,
-            database: Database::new(is_leader).await,  
+            database: Database::new(is_leader, peers).await,  
             network,
             omnipaxos,
             current_decided_idx: 0,
@@ -149,14 +150,6 @@ impl OmniPaxosServer {
         // TODO: batching responses possible here (batch at handle_cluster_messages)
         for command in commands {
             let kv_cmd = command.kv_cmd.clone(); // Clone before passing
-
-            // Ensures all committed entries are applied before handling linearizable read
-            if let KVCommand::Get { key: _, consistency } = &kv_cmd {
-                if matches!(consistency, ConsistencyLevel::Linearizable) {
-                    Box::pin(self.handle_decided_entries()).await;
-                }                
-            }            
-
             let read = self.database.handle_command(kv_cmd.clone()).await; 
     
             if command.coordinator_id == self.id {
