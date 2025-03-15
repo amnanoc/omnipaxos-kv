@@ -135,3 +135,92 @@ impl Database {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Import everything from the parent module
+    use tokio; // For async tests
+
+    // Helper function to set up a test database
+    async fn setup_database(is_leader: bool, peers: Vec<NodeId>) -> Database {
+        let database_url = "postgres://user:password@localhost/mydatabase"; // Use a test database
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await
+            .expect("Failed to connect to PostgreSQL");
+
+        // Ensure table exists
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create table");
+
+        Database { pool, is_leader, peers }
+    }
+
+    #[tokio::test]
+    async fn test_quorum_read() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key1".to_string(), "value1".to_string());
+        database.handle_command(put_command).await;
+
+        // Test quorum read
+        let result = database.quorum_read("key1".to_string()).await;
+        assert_eq!(result, Some("value1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_read_from_peer() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key2".to_string(), "value2".to_string());
+        database.handle_command(put_command).await;
+
+        // Test read from peer
+        let result = database.read_from_peer(&1, "key2").await;
+        assert_eq!(result, Some("value2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_leader() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key3".to_string(), "value3".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Leader
+        let get_command = KVCommand::Get {
+            key: "key3".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value3".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_linearizable() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key4".to_string(), "value4".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Linearizable
+        let get_command = KVCommand::Get {
+            key: "key4".to_string(),
+            consistency: ConsistencyLevel::Linearizable,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value4".to_string())));
+    }
+}

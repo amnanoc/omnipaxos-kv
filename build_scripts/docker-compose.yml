@@ -113,24 +113,7 @@ services:
     networks:
       - omnipaxos-net
 
-  test:
-    image: omnipaxos-test
-    build:
-      context: ./..
-      dockerfile: test.dockerfile
-    container_name: test
-    environment:
-      RUST_LOG: "debug"
-    volumes:
-      - ./logs/:/app/logs/
-    depends_on:
-      - s1
-      - s2
-      - s3
-      - c1
-      - c2
-    networks:
-      - omnipaxos-net
+  
 
 volumes:
   postgres_data:
