@@ -6,7 +6,6 @@ use omnipaxos::{
 };
 use std::collections::HashMap;
  
-
 pub struct Database {
  
     pool: Pool<Postgres>,
@@ -72,7 +71,7 @@ impl Database {
     }
 
     /// Read a value from a specific peer
-    async fn read_from_peer(&self, peer: &NodeId, key: &str) -> Option<String> {
+    async fn read_from_peer(&self, _peer: &NodeId, key: &str) -> Option<String> {
         let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
             .bind(key)
             .fetch_optional(&self.pool)
@@ -86,7 +85,7 @@ impl Database {
     pub async fn handle_command(&self, command: KVCommand) -> Option<Option<String>> {
         match command {
             KVCommand::Put(key, value) => {
-                let result = sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
+                let _result = sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
                                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;")
                     .bind(&key)
                     .bind(&value)
