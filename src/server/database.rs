@@ -138,10 +138,9 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Import everything from the parent module
-    use tokio; // For async tests
+    use super::*;
+    use tokio;
 
-    // Helper function to set up a test database
     async fn setup_database(is_leader: bool, peers: Vec<NodeId>) -> Database {
         let database_url = "postgres://user:password@localhost/mydatabase"; // Use a test database
         let pool = PgPoolOptions::new()
@@ -205,6 +204,40 @@ mod tests {
         };
         let result = database.handle_command(get_command).await;
         assert_eq!(result, Some(Some("value3".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_local() {
+        let database = setup_database(false, vec![1, 2, 3]).await; // Not the leader
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key4".to_string(), "value4".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Local
+        let get_command = KVCommand::Get {
+            key: "key4".to_string(),
+            consistency: ConsistencyLevel::Local,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value4".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_leader_forwarding() {
+        let database = setup_database(false, vec![1, 2, 3]).await; // Not the leader
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key5".to_string(), "value5".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Leader (should forward to leader)
+        let get_command = KVCommand::Get {
+            key: "key5".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, None); // Expecting None because the node is not the leader
     }
 
     #[tokio::test]
