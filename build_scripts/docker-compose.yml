@@ -10,6 +10,19 @@ x-common-variables: &common-server-variables
   OMNIPAXOS_LISTEN_PORT: 8000                     # Overwrite listen_port in server config TOMLs
 
 services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - omnipaxos-net
+
   s1:
     image: omnipaxos-server
     build:
@@ -76,7 +89,7 @@ services:
     environment:
       RUST_LOG: "debug"
       CONFIG_FILE: "/app/client-config.toml"
-      OMNIPAXOS_SERVER_ADDRESS: "s1:8000" # Overwrite server_address in client config TOML
+      OMNIPAXOS_SERVER_ADDRESS: "s1:8000"
     volumes:
       - ./client-1-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
@@ -91,7 +104,7 @@ services:
     environment:
       RUST_LOG: "debug"
       CONFIG_FILE: "/app/client-config.toml"
-      OMNIPAXOS_SERVER_ADDRESS: "s2:8000" # Overwrite server_address in client config TOML
+      OMNIPAXOS_SERVER_ADDRESS: "s2:8000"
     volumes:
       - ./client-2-config.toml:/app/client-config.toml
       - ./logs/:/app/logs/
@@ -100,19 +113,7 @@ services:
     networks:
       - omnipaxos-net
 
-  postgres:
-    image: postgres:13
-    container_name: postgres
-    environment:
-      POSTGRES_USER: "user"
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "mydatabase"
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - omnipaxos-net
+  
 
 volumes:
   postgres_data:

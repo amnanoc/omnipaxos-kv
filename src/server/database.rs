@@ -6,7 +6,6 @@ use omnipaxos::{
 };
 use std::collections::HashMap;
  
-
 pub struct Database {
  
     pool: Pool<Postgres>,
@@ -72,7 +71,7 @@ impl Database {
     }
 
     /// Read a value from a specific peer
-    async fn read_from_peer(&self, peer: &NodeId, key: &str) -> Option<String> {
+    async fn read_from_peer(&self, _peer: &NodeId, key: &str) -> Option<String> {
         let row = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
             .bind(key)
             .fetch_optional(&self.pool)
@@ -86,7 +85,7 @@ impl Database {
     pub async fn handle_command(&self, command: KVCommand) -> Option<Option<String>> {
         match command {
             KVCommand::Put(key, value) => {
-                let result = sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
+                let _result = sqlx::query("INSERT INTO kv_store (key, value) VALUES ($1, $2) 
                                           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;")
                     .bind(&key)
                     .bind(&value)
@@ -134,5 +133,127 @@ impl Database {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio;
+
+    async fn setup_database(is_leader: bool, peers: Vec<NodeId>) -> Database {
+        let database_url = "postgres://user:password@localhost/mydatabase"; // Use a test database
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await
+            .expect("Failed to connect to PostgreSQL");
+
+        // Ensure table exists
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS kv_store (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );"
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create table");
+
+        Database { pool, is_leader, peers }
+    }
+
+    #[tokio::test]
+    async fn test_quorum_read() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key1".to_string(), "value1".to_string());
+        database.handle_command(put_command).await;
+
+        // Test quorum read
+        let result = database.quorum_read("key1".to_string()).await;
+        assert_eq!(result, Some("value1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_read_from_peer() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key2".to_string(), "value2".to_string());
+        database.handle_command(put_command).await;
+
+        // Test read from peer
+        let result = database.read_from_peer(&1, "key2").await;
+        assert_eq!(result, Some("value2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_leader() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key3".to_string(), "value3".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Leader
+        let get_command = KVCommand::Get {
+            key: "key3".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value3".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_local() {
+        let database = setup_database(false, vec![1, 2, 3]).await; // Not the leader
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key4".to_string(), "value4".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Local
+        let get_command = KVCommand::Get {
+            key: "key4".to_string(),
+            consistency: ConsistencyLevel::Local,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value4".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_leader_forwarding() {
+        let database = setup_database(false, vec![1, 2, 3]).await; // Not the leader
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key5".to_string(), "value5".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Leader (should forward to leader)
+        let get_command = KVCommand::Get {
+            key: "key5".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, None); // Expecting None because the node is not the leader
+    }
+
+    #[tokio::test]
+    async fn test_handle_command_get_linearizable() {
+        let database = setup_database(true, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair
+        let put_command = KVCommand::Put("key4".to_string(), "value4".to_string());
+        database.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Linearizable
+        let get_command = KVCommand::Get {
+            key: "key4".to_string(),
+            consistency: ConsistencyLevel::Linearizable,
+        };
+        let result = database.handle_command(get_command).await;
+        assert_eq!(result, Some(Some("value4".to_string())));
     }
 }
