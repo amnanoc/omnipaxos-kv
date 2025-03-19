@@ -16,10 +16,17 @@ pub struct Database {
 impl Database {
     /// Initializes the database and connects to PostgreSQL
     pub async fn new(is_leader: bool, peers: Vec<NodeId>) -> Self {
-        let database_url = "postgres://user:password@postgres/mydatabase";
+        let postgres_host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "postgres".to_string());
+        let postgres_db = std::env::var("POSTGRES_DB").unwrap_or_else(|_| "mydatabase".to_string());
+
+        let database_url = format!(
+            "postgres://user:password@{}/{}",
+            postgres_host, postgres_db
+        );
+
         let pool = PgPoolOptions::new()
             .max_connections(5)
-            .connect(database_url)
+            .connect(&database_url)
             .await
             .expect("Failed to connect to PostgreSQL");
 

@@ -1,25 +1,50 @@
-# NOTE: Dont use `docker compose up --build` because s2-s5 will pull a stale image that
-# won't reflect any changes s1 makes to the image in the build step. Instead call
-# `docker compose build` then `docker compose up`.
+version: '3.8'
+
 x-common-variables: &common-server-variables
   RUST_LOG: "debug"
   SERVER_CONFIG_FILE: "/app/server-config.toml"
   CLUSTER_CONFIG_FILE: "/app/cluster-config.toml"
   OMNIPAXOS_NODE_ADDRS: "s1:8000,s2:8000,s3:8000" # Overwrite node_addrs in cluster config TOML
-  OMNIPAXOS_LISTEN_ADDRESS: "0.0.0.0"             # Overwrite listen_address in server config TOMLs
-  OMNIPAXOS_LISTEN_PORT: 8000                     # Overwrite listen_port in server config TOMLs
+  OMNIPAXOS_LISTEN_ADDRESS: "0.0.0.0" # Overwrite listen_address in server config TOMLs
+  OMNIPAXOS_LISTEN_PORT: 8000 # Overwrite listen_port in server config TOMLs
 
 services:
-  postgres:
+  postgres-s1:
     image: postgres:13
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydatabase
+      POSTGRES_DB: mydatabase_s1 
     ports:
-      - "5432:5432"
+      - "5444:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_s1:/var/lib/postgresql/data
+    networks:
+      - omnipaxos-net
+
+  postgres-s2:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase_s2  
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data_s2:/var/lib/postgresql/data
+    networks:
+      - omnipaxos-net
+
+  postgres-s3:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase_s3  
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data_s3:/var/lib/postgresql/data
     networks:
       - omnipaxos-net
 
@@ -31,16 +56,16 @@ services:
     container_name: s1
     environment:
       <<: *common-server-variables
-      POSTGRES_HOST: "postgres"
+      POSTGRES_HOST: "postgres-s1"
       POSTGRES_USER: "user"
       POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "mydatabase"
+      POSTGRES_DB: "mydatabase_s1"
     volumes:
       - ./server-1-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
     depends_on:
-      - postgres
+      - postgres-s1
     networks:
       - omnipaxos-net
 
@@ -49,16 +74,16 @@ services:
     container_name: s2
     environment:
       <<: *common-server-variables
-      POSTGRES_HOST: "postgres"
+      POSTGRES_HOST: "postgres-s2"
       POSTGRES_USER: "user"
       POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "mydatabase"
+      POSTGRES_DB: "mydatabase_s2"
     volumes:
       - ./server-2-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
     depends_on:
-      - postgres
+      - postgres-s2
     networks:
       - omnipaxos-net
 
@@ -67,16 +92,16 @@ services:
     container_name: s3
     environment:
       <<: *common-server-variables
-      POSTGRES_HOST: "postgres"
+      POSTGRES_HOST: "postgres-s3"
       POSTGRES_USER: "user"
       POSTGRES_PASSWORD: "password"
-      POSTGRES_DB: "mydatabase"
+      POSTGRES_DB: "mydatabase_s3"
     volumes:
       - ./server-3-config.toml:/app/server-config.toml
       - ./cluster-config.toml:/app/cluster-config.toml
       - ./logs/:/app/logs/
     depends_on:
-      - postgres
+      - postgres-s3
     networks:
       - omnipaxos-net
 
@@ -113,10 +138,10 @@ services:
     networks:
       - omnipaxos-net
 
-  
-
 volumes:
-  postgres_data:
+  postgres_data_s1:
+  postgres_data_s2:
+  postgres_data_s3:
 
 networks:
   omnipaxos-net:
