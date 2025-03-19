@@ -43,18 +43,18 @@ impl Database {
 
         // Hardcoded peer database URLs
         let peer_database_urls = peers
-            .iter()
-            .map(|&peer| {
-                let db_name = match peer {
-                    1 => "mydatabase_s1",
-                    2 => "mydatabase_s2",
-                    3 => "mydatabase_s3",
-                    _ => panic!("Unknown peer ID"),
-                };
-                let url = format!("postgres://user:password@postgres-{}/{}", db_name, db_name);
-                (peer, url)
-            })
-            .collect();
+        .iter()
+        .map(|&peer| {
+            let (host, db_name) = match peer {
+                1 => ("postgres-s1", "mydatabase_s1"),
+                2 => ("postgres-s2", "mydatabase_s2"),
+                3 => ("postgres-s3", "mydatabase_s3"),
+                _ => panic!("Unknown peer ID"),
+            };
+            let url = format!("postgres://user:password@{}/{}", host, db_name);
+            (peer, url)
+        })
+        .collect();
 
         Self {
             pool,
