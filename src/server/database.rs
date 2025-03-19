@@ -256,4 +256,55 @@ mod tests {
         let result = database.handle_command(get_command).await;
         assert_eq!(result, Some(Some("value4".to_string())));
     }
+
+    // More elaborate tests here
+    #[tokio::test]
+    async fn test_leader_consistency_multiple_nodes() {
+        // Setup leader and follower databases
+        let leader_db = setup_database(true, vec![1, 2, 3]).await;
+        let follower_db = setup_database(false, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair on the leader
+        let put_command = KVCommand::Put("key6".to_string(), "value6".to_string());
+        leader_db.handle_command(put_command).await;
+
+        // Test GET operation with ConsistencyLevel::Leader on the follower (should forward to leader)
+        let get_command = KVCommand::Get {
+            key: "key6".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        let result = follower_db.handle_command(get_command.clone()).await; 
+        assert_eq!(result, None); // Expecting None because the node is not the leader
+
+        // Test GET operation with ConsistencyLevel::Leader on the leader
+        let result = leader_db.handle_command(get_command).await; // Use the original
+        assert_eq!(result, Some(Some("value6".to_string())));
+    }
+
+
+    #[tokio::test]
+    async fn test_linearizable_consistency_multiple() {
+        // Simulate different databases states for multiple nodes
+        let db1 = setup_database(true, vec![1, 2, 3]).await;
+        let db2 = setup_database(false, vec![1, 2, 3]).await;
+        let _db3 = setup_database(false, vec![1, 2, 3]).await;
+
+        // Insert a key-value pair on the leader
+        let put_command = KVCommand::Put("key9".to_string(), "value9".to_string());
+        db1.handle_command(put_command).await;
+
+        // Simulate a situation where db3 is "unreachable"
+        let get_command = KVCommand::Get {
+            key: "key9".to_string(),
+            consistency: ConsistencyLevel::Linearizable,
+        };
+
+        // Ensure quorum read still works with available nodes
+        let result1 = db1.handle_command(get_command.clone()).await;
+        let result2 = db2.handle_command(get_command.clone()).await;
+
+        assert_eq!(result1, Some(Some("value9".to_string())));
+        assert_eq!(result2, Some(Some("value9".to_string())));
+    }
+
 }
