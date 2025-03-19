@@ -162,3 +162,288 @@ impl Database {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::test;
+    use std::env;
+    use std::sync::Once;
+
+    // Initialize test environment once
+    static INIT: Once = Once::new();
+    
+    fn initialize() {
+        INIT.call_once(|| {
+            // Set environment variables for testing
+            env::set_var("POSTGRES_HOST", "localhost");
+            env::set_var("POSTGRES_DB", "test_db");
+            
+            // You could also set up a test logger here
+            env_logger::init();
+        });
+    }
+
+    // Mock version of Database for testing
+    struct MockDatabase {
+        is_leader: bool,
+        storage: HashMap<String, String>,
+        peers: Vec<NodeId>,
+        peer_storage: HashMap<NodeId, HashMap<String, String>>,
+    }
+
+    impl MockDatabase {
+        fn new(is_leader: bool, peers: Vec<NodeId>) -> Self {
+            let mut peer_storage = HashMap::new();
+            for &peer in &peers {
+                peer_storage.insert(peer, HashMap::new());
+            }
+            
+            Self {
+                is_leader,
+                storage: HashMap::new(),
+                peers,
+                peer_storage,
+            }
+        }
+
+        fn set_leader_status(&mut self, is_leader: bool) {
+            self.is_leader = is_leader;
+        }
+
+        async fn handle_command(&mut self, command: KVCommand) -> Option<Option<String>> {
+            match command {
+                KVCommand::Put(key, value) => {
+                    self.storage.insert(key, value);
+                    None
+                },
+                KVCommand::Delete(key) => {
+                    self.storage.remove(&key);
+                    None
+                },
+                KVCommand::Get { key, consistency } => {
+                    match consistency {
+                        ConsistencyLevel::Leader => {
+                            if self.is_leader {
+                                Some(self.storage.get(&key).cloned())
+                            } else {
+                                None // Indicating forward to leader
+                            }
+                        },
+                        ConsistencyLevel::Local => {
+                            Some(self.storage.get(&key).cloned())
+                        },
+                        ConsistencyLevel::Linearizable => {
+                            // Simulate quorum read
+                            let mut values = HashMap::new();
+                            
+                            // Count this node's value
+                            if let Some(value) = self.storage.get(&key) {
+                                *values.entry(value.clone()).or_insert(0) += 1;
+                            }
+                            
+                            // Count peer values
+                            for (&peer_id, peer_data) in &self.peer_storage {
+                                if let Some(value) = peer_data.get(&key) {
+                                    *values.entry(value.clone()).or_insert(0) += 1;
+                                }
+                            }
+                            
+                            // Find value with quorum
+                            let quorum_size = (self.peers.len() / 2) + 1;
+                            for (value, count) in values {
+                                if count >= quorum_size {
+                                    return Some(Some(value));
+                                }
+                            }
+                            
+                            Some(None) // No quorum
+                        }
+                    }
+                }
+            }
+        }
+
+        // Helper method to set peer data for testing
+        fn set_peer_data(&mut self, peer_id: NodeId, key: &str, value: &str) {
+            if let Some(peer_data) = self.peer_storage.get_mut(&peer_id) {
+                peer_data.insert(key.to_string(), value.to_string());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_local_consistency() {
+        initialize();
+        
+        // Create mock databases
+        let peers = vec![1, 2, 3];
+        let mut db1 = MockDatabase::new(true, peers.clone());  // Node 1 is leader
+        let mut db2 = MockDatabase::new(false, peers.clone()); // Node 2 is follower
+        let mut db3 = MockDatabase::new(false, peers.clone()); // Node 3 is follower
+        
+        // Insert data into db1 (leader)
+        let put_cmd = KVCommand::Put("test_local_key".to_string(), "leader_value".to_string());
+        db1.handle_command(put_cmd).await;
+        
+        // Insert different data into db2 (follower)
+        let put_cmd = KVCommand::Put("test_local_key".to_string(), "follower_value".to_string());
+        db2.handle_command(put_cmd).await;
+        
+        // Test local consistency on each node
+        let get_cmd = KVCommand::Get {
+            key: "test_local_key".to_string(),
+            consistency: ConsistencyLevel::Local,
+        };
+        
+        // Each node should return its own local value
+        let result1 = db1.handle_command(get_cmd.clone()).await;
+        let result2 = db2.handle_command(get_cmd.clone()).await;
+        let result3 = db3.handle_command(get_cmd.clone()).await;
+        
+        assert_eq!(result1, Some(Some("leader_value".to_string())));
+        assert_eq!(result2, Some(Some("follower_value".to_string())));
+        assert_eq!(result3, Some(None)); // db3 doesn't have the key
+    }
+
+    #[tokio::test]
+    async fn test_leader_consistency() {
+        initialize();
+        
+        // Create mock databases
+        let peers = vec![1, 2, 3];
+        let mut db1 = MockDatabase::new(true, peers.clone());  // Node 1 is leader
+        let mut db2 = MockDatabase::new(false, peers.clone()); // Node 2 is follower
+        
+        // Insert data into db1 (leader)
+        let put_cmd = KVCommand::Put("test_leader_key".to_string(), "leader_value".to_string());
+        db1.handle_command(put_cmd).await;
+        
+        // Insert different data into db2 (follower)
+        let put_cmd = KVCommand::Put("test_leader_key".to_string(), "follower_value".to_string());
+        db2.handle_command(put_cmd).await;
+        
+        // Test leader consistency
+        let get_cmd = KVCommand::Get {
+            key: "test_leader_key".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        
+        // Leader should return its value
+        let result1 = db1.handle_command(get_cmd.clone()).await;
+        // Follower should return None (indicating forward to leader)
+        let result2 = db2.handle_command(get_cmd.clone()).await;
+        
+        assert_eq!(result1, Some(Some("leader_value".to_string())));
+        assert_eq!(result2, None); // Indicates forwarding to leader
+    }
+
+    #[tokio::test]
+    async fn test_linearizable_consistency() {
+        initialize();
+        
+        // Create mock databases
+        let peers = vec![1, 2, 3];
+        let mut db1 = MockDatabase::new(true, peers.clone());
+        
+        // Set up data for quorum test
+        // db1 and db2 have "quorum_value", db3 has "minority_value"
+        db1.storage.insert("test_quorum_key".to_string(), "quorum_value".to_string());
+        db1.set_peer_data(2, "test_quorum_key", "quorum_value");
+        db1.set_peer_data(3, "test_quorum_key", "minority_value");
+        
+        // Test linearizable consistency (quorum read)
+        let get_cmd = KVCommand::Get {
+            key: "test_quorum_key".to_string(),
+            consistency: ConsistencyLevel::Linearizable,
+        };
+        
+        // Should return the value that has quorum
+        let result = db1.handle_command(get_cmd.clone()).await;
+        assert_eq!(result, Some(Some("quorum_value".to_string())));
+        
+        // Now change db1's value and test again
+        db1.storage.insert("test_quorum_key".to_string(), "new_value".to_string());
+        
+        // No quorum for any value now (1 for "new_value", 1 for "quorum_value", 1 for "minority_value")
+        let result = db1.handle_command(get_cmd.clone()).await;
+        assert_eq!(result, Some(None)); // No quorum reached
+        
+        // Create quorum for "new_value"
+        db1.set_peer_data(3, "test_quorum_key", "new_value");
+        
+        // Now there should be quorum for "new_value"
+        let result = db1.handle_command(get_cmd.clone()).await;
+        assert_eq!(result, Some(Some("new_value".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_leader_change() {
+        initialize();
+        
+        // Create mock databases
+        let peers = vec![1, 2, 3];
+        let mut db1 = MockDatabase::new(true, peers.clone());  // Node 1 starts as leader
+        let mut db2 = MockDatabase::new(false, peers.clone()); // Node 2 starts as follower
+        
+        // Insert data as leader
+        let put_cmd = KVCommand::Put("leader_change_key".to_string(), "original_value".to_string());
+        db1.handle_command(put_cmd).await;
+        
+        // Test leader consistency
+        let get_cmd = KVCommand::Get {
+            key: "leader_change_key".to_string(),
+            consistency: ConsistencyLevel::Leader,
+        };
+        
+        let result1 = db1.handle_command(get_cmd.clone()).await;
+        let result2 = db2.handle_command(get_cmd.clone()).await;
+        
+        assert_eq!(result1, Some(Some("original_value".to_string())));
+        assert_eq!(result2, None); // Indicates forwarding to leader
+        
+        // Change leadership
+        db1.set_leader_status(false);
+        db2.set_leader_status(true);
+        
+        // Copy data to db2 to simulate replication
+        db2.storage.insert("leader_change_key".to_string(), "original_value".to_string());
+        
+        // Test again after leadership change
+        let result1 = db1.handle_command(get_cmd.clone()).await;
+        let result2 = db2.handle_command(get_cmd.clone()).await;
+        
+        assert_eq!(result1, None); // Now db1 forwards to leader
+        assert_eq!(result2, Some(Some("original_value".to_string()))); // db2 is now leader
+    }
+
+    #[tokio::test]
+    async fn test_delete_operation() {
+        initialize();
+        
+        // Create mock database
+        let peers = vec![1, 2, 3];
+        let mut db = MockDatabase::new(true, peers.clone());
+        
+        // Insert data
+        let put_cmd = KVCommand::Put("delete_test_key".to_string(), "test_value".to_string());
+        db.handle_command(put_cmd).await;
+        
+        // Verify data exists
+        let get_cmd = KVCommand::Get {
+            key: "delete_test_key".to_string(),
+            consistency: ConsistencyLevel::Local,
+        };
+        
+        let result = db.handle_command(get_cmd.clone()).await;
+        assert_eq!(result, Some(Some("test_value".to_string())));
+        
+        // Delete the data
+        let delete_cmd = KVCommand::Delete("delete_test_key".to_string());
+        db.handle_command(delete_cmd).await;
+        
+        // Verify data is deleted
+        let result = db.handle_command(get_cmd).await;
+        assert_eq!(result, Some(None));
+    }
+}
